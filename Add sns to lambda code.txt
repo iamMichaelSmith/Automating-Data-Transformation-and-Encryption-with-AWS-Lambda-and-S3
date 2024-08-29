@@ -10,7 +10,7 @@ def lambda_handler(event, context):
     object_key = 'smalldb.txt'
     converted_folder = 'converted/'
     cleaned_object_key = converted_folder + 'cleaned_data.csv'
-    sns_topic_arn = 'arn:aws:sns:us-east-1:309014076408:DynamoDBImportSuccess'
+    sns_topic_arn = 'arn:aws:sns:us-east-1:ADDYOURSNSARNHERE:DynamoDBImportSuccess'
     
     try:
         # Get the text file from S3
