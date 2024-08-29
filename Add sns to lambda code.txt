@@ -1,0 +1,82 @@
+import boto3
+import io
+import csv
+
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    dynamodb = boto3.client('dynamodb')
+    sns = boto3.client('sns')
+    bucket_name = 'database-raw-data'
+    object_key = 'smalldb.txt'
+    converted_folder = 'converted/'
+    cleaned_object_key = converted_folder + 'cleaned_data.csv'
+    sns_topic_arn = 'arn:aws:sns:us-east-1:309014076408:DynamoDBImportSuccess'
+    
+    try:
+        # Get the text file from S3
+        response = s3.get_object(Bucket=bucket_name, Key=object_key)
+        file_content = response['Body'].read().decode('utf-8')
+        
+        # Split the data into entries
+        entries = file_content.split(', ')
+        
+        # Create a CSV in-memory file
+        csv_output = io.StringIO()
+        csv_writer = csv.writer(csv_output)
+        
+        # Write CSV header
+        csv_writer.writerow(['Name', 'Source', 'Zip Code', 'Address', 'Phone', 'Email'])
+        
+        # Process each entry
+        for entry in entries:
+            lines = entry.strip().split('\n')
+            if not lines or len(lines) < 2:
+                continue  # Skip empty or incomplete entries
+            
+            # Extract fields
+            name = lines[0].strip() if lines[0].strip() else 'N/A'
+            source = next((line.replace("Source ", "").strip() for line in lines if line.startswith("Source")), "")
+            zip_code = next((line.replace("Zip Code ", "").strip() for line in lines if line.startswith("Zip Code")), "")
+            address = next((line.replace("Address ", "").strip() for line in lines if line.startswith("Address")), "")
+            phone = next((line.replace("Phone ", "").strip() for line in lines if line.startswith("Phone")), "")
+            email = next((line.replace("Email ", "").strip() for line in lines if line.startswith("Email")), "")
+            
+            # Write data to CSV
+            csv_writer.writerow([name, source, zip_code, address, phone, email])
+            
+            # Put item into DynamoDB
+            dynamodb.put_item(
+                TableName='TransformedDataLogs',
+                Item={
+                    'ID': {'S': f"{name}_{source}_{zip_code}"},
+                    'Name': {'S': name},
+                    'Source': {'S': source},
+                    'Zip Code': {'S': zip_code},
+                    'Address': {'S': address},
+                    'Phone': {'S': phone},
+                    'Email': {'S': email}
+                }
+            )
+        
+        # Upload the CSV to S3
+        csv_output.seek(0)
+        s3.put_object(Bucket=bucket_name, Key=cleaned_object_key, Body=csv_output.getvalue(), ContentType='text/csv')
+        
+        # Send SNS notification
+        sns.publish(
+            TopicArn=sns_topic_arn,
+            Message=f"Data successfully imported into DynamoDB and processed file uploaded to S3.",
+            Subject="DynamoDB Import Success"
+        )
+
+        return {
+            'statusCode': 200,
+            'body': 'CSV file created successfully, uploaded to S3, and notification sent.'
+        }
+
+    except Exception as e:
+        print(e)
+        return {
+            'statusCode': 500,
+            'body': f'Error: {str(e)}'
+        }
